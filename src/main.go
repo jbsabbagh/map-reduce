@@ -79,13 +79,16 @@ func main() {
 		}
 		output := reducef(intermediate[i].Key, values)
 
-		// this is the correct format for each line of Reduce output.
-		fmt.Fprintf(ofile, "%v %v\n", intermediate[i].Key, output)
+		writeRecord(ofile, intermediate[i].Key, output)
 
 		i = j
 	}
 
 	ofile.Close()
+}
+
+func writeRecord(ofile *os.File, key string, value string) {
+	fmt.Fprintf(ofile, "%v %v\n", key, value)
 }
 
 // load the application Map and Reduce functions
