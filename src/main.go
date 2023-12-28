@@ -8,7 +8,7 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	mr "map-reduce/src/pkg"
 	"os"
@@ -31,42 +31,55 @@ func main() {
 	}
 
 	mapf, reducef := loadPlugin(os.Args[1])
+	intermediate := callMap(mapf, os.Args[2:])
+	sort.Sort(ByKey(intermediate))
+	callReduce(reducef, intermediate)
+}
 
-	//
+func callMap(mapf func(string, string) []mr.KeyValue, filenames []string) []mr.KeyValue {
 	// read each input file,
 	// pass it to Map,
 	// accumulate the intermediate Map output.
 	//
 	intermediate := []mr.KeyValue{}
-	for _, filename := range os.Args[2:] {
-		file, err := os.Open(filename)
-		if err != nil {
-			log.Fatalf("cannot open %v", filename)
-		}
-		content, err := ioutil.ReadAll(file)
-		if err != nil {
-			log.Fatalf("cannot read %v", filename)
-		}
-		file.Close()
+	for _, filename := range filenames {
+		content := readFile(filename)
 		kva := mapf(filename, string(content))
+
+		//
+		// a big difference from real MapReduce is that all the
+		// intermediate data is in one place, intermediate[],
+		// rather than being partitioned into NxM buckets.
+		//
 		intermediate = append(intermediate, kva...)
+
 	}
+	return intermediate
+}
 
-	//
-	// a big difference from real MapReduce is that all the
-	// intermediate data is in one place, intermediate[],
-	// rather than being partitioned into NxM buckets.
-	//
+func readFile(filename string) string {
+	file, err := os.Open(filename)
+	defer file.Close()
 
-	sort.Sort(ByKey(intermediate))
+	if err != nil {
+		log.Fatalf("cannot open %v", filename)
+	}
+	content, err := io.ReadAll(file)
+	if err != nil {
+		log.Fatalf("cannot read %v", filename)
+	}
+	return string(content)
+}
 
-	oname := "mr-out-0"
-	ofile, _ := os.Create(oname)
-
+func callReduce(reducef func(string, []string) string, intermediate []mr.KeyValue) {
 	//
 	// call Reduce on each distinct key in intermediate[],
 	// and print the result to mr-out-0.
 	//
+
+	oname := "mr-out-0"
+	ofile, _ := os.Create(oname)
+
 	i := 0
 	for i < len(intermediate) {
 		j := i + 1
