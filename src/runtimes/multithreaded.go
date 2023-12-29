@@ -7,16 +7,22 @@ import (
 )
 
 // for sorting by key.
+type ByKey []mr.KeyValue
 
-type SequentialRuntime struct{}
+// for sorting by key.
+func (a ByKey) Len() int           { return len(a) }
+func (a ByKey) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a ByKey) Less(i, j int) bool { return a[i].Key < a[j].Key }
 
-func (r SequentialRuntime) Run(app *mr.MapReduceApp) {
+type MultithreadedRuntime struct{}
+
+func (r MultithreadedRuntime) Run(app *mr.MapReduceApp) {
 	intermediate := r.callMap(app.MapFunction, app.InputFilenames)
 	sort.Sort(ByKey(intermediate))
 	r.callReduce(app.ReduceFunction, intermediate)
 }
 
-func (r SequentialRuntime) callMap(mapf func(string, string) []mr.KeyValue, filenames []string) []mr.KeyValue {
+func (r MultithreadedRuntime) callMap(mapf func(string, string) []mr.KeyValue, filenames []string) []mr.KeyValue {
 	// read each input file,
 	// pass it to Map,
 	// accumulate the intermediate Map output.
@@ -37,7 +43,7 @@ func (r SequentialRuntime) callMap(mapf func(string, string) []mr.KeyValue, file
 	return intermediate
 }
 
-func (r SequentialRuntime) callReduce(reducef func(string, []string) string, intermediate []mr.KeyValue) {
+func (r MultithreadedRuntime) callReduce(reducef func(string, []string) string, intermediate []mr.KeyValue) {
 	//
 	// call Reduce on each distinct key in intermediate[],
 	// and print the result to mr-out-0.

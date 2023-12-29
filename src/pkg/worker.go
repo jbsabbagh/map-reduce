@@ -7,12 +7,6 @@ import (
 	"net/rpc"
 )
 
-// Map functions return a slice of KeyValue.
-type KeyValue struct {
-	Key   string
-	Value string
-}
-
 // use ihash(key) % NReduce to choose the reduce
 // task number for each KeyValue emitted by Map.
 func ihash(key string) int {
