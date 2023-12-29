@@ -7,7 +7,6 @@ package main
 //
 
 import (
-	"fmt"
 	"log"
 	mr "map-reduce/src/pkg"
 	runtime "map-reduce/src/runtimes"
@@ -16,15 +15,13 @@ import (
 )
 
 func main() {
-	if len(os.Args) < 3 {
-		fmt.Fprintf(os.Stderr, "Usage: mrsequential xxx.so inputfiles...\n")
-		os.Exit(1)
-	}
+	args := ParsedArgs{}
+	args.parse()
 
-	mapf, reducef := loadPlugin(os.Args[1])
+	mapf, reducef := loadPlugin(args.PluginFilename)
 
 	app := mr.MapReduceApp{
-		InputFilenames: os.Args[2:],
+		InputFilenames: args.InputFilenames,
 		MapFunction:    mapf,
 		ReduceFunction: reducef,
 	}
@@ -32,6 +29,20 @@ func main() {
 	runtime := runtime.SequentialRuntime{}
 
 	runtime.Run(&app)
+}
+
+type ParsedArgs struct {
+	PluginFilename string
+	InputFilenames []string
+}
+
+func (p *ParsedArgs) parse() {
+	if len(os.Args) < 3 {
+		log.Fatalf("Usage: mrsequential xxx.so inputfiles...\n")
+	}
+
+	p.PluginFilename = os.Args[1]
+	p.InputFilenames = os.Args[2:]
 }
 
 // load the application Map and Reduce functions
