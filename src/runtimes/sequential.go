@@ -24,7 +24,7 @@ func (r SequentialRuntime) callMap(mapf func(string, string) []mr.KeyValue, file
 	intermediate := []mr.KeyValue{}
 	for _, filename := range filenames {
 		content := readFile(filename)
-		kva := mapf(filename, string(content))
+		kva := mapf(filename, content)
 
 		//
 		// a big difference from real MapReduce is that all the
