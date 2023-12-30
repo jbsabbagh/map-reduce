@@ -1,5 +1,8 @@
 #!/bin/bash
 
+rm data/intermediate/intermediate-*
+rm data/out/mr-out-*
+
 start=$(date +%s)
 echo "Running test..."
 go build -buildmode=plugin apps/wordcount/wc.go
@@ -16,5 +19,5 @@ fi
 
 
 echo "Cleanup..."
-rm data/intermediate/intermediate-*
-rm mr-out*
+# rm data/intermediate/intermediate-*
+# rm data/out/out-*

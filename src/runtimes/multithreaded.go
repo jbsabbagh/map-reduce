@@ -27,10 +27,10 @@ type SyncedFile struct {
 	Mutex *sync.Mutex
 }
 
-func (f SyncedFile) Write(kv mr.KeyValue) {
+func (f SyncedFile) Write(key, value string) {
 	f.Mutex.Lock()
 	defer f.Mutex.Unlock()
-	writeRecord(f.File, kv.Key, kv.Value)
+	writeRecord(f.File, key, value)
 }
 
 func (f SyncedFile) Close() {
@@ -70,7 +70,7 @@ func (r MultithreadedRuntime) callMap(mapf func(string, string) []mr.KeyValue, f
 			for _, kv := range keyValues {
 				bucket := ihash(kv.Key) % BUCKETS
 				file := files[bucket]
-				file.Write(kv)
+				file.Write(kv.Key, kv.Value)
 			}
 		}(filename, files)
 	}
@@ -88,44 +88,56 @@ func (r MultithreadedRuntime) callReduce(reducef func(string, []string) string) 
 	//
 	dir := "data/intermediate/"
 	files, err := os.ReadDir(dir)
-	intermediate := []mr.KeyValue{}
-
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	for _, file := range files {
-		fileHandle, _ := os.Open(dir + file.Name())
-		defer fileHandle.Close()
-		scanner := bufio.NewScanner(fileHandle)
-		for scanner.Scan() {
-			line := scanner.Text()
-			values := strings.Split(line, " ")
-			intermediate = append(intermediate, mr.KeyValue{Key: values[0], Value: values[1]})
-		}
+	// outputFiles := make(map[int]SyncedFile)
+	// for index := 0; index < BUCKETS; index++ {
+	// 	oname := fmt.Sprintf("mr-out-%d", index)
+	// 	filepath := fmt.Sprintf("data/out/%s", oname)
+	// 	file, _ := os.Create(filepath)
+	// 	outputFiles[index] = SyncedFile{File: file, Mutex: &sync.Mutex{}}
+	// }
+
+	var wg sync.WaitGroup
+	for index, file := range files {
+		outputFile, _ := os.Create(fmt.Sprintf("data/out/mr-out-%d", index))
+		wg.Add(1)
+		go func(file os.DirEntry, outputFile *os.File) {
+			defer wg.Done()
+			fileHandle, _ := os.Open(dir + file.Name())
+			defer fileHandle.Close()
+
+			intermediate := []mr.KeyValue{}
+
+			scanner := bufio.NewScanner(fileHandle)
+			for scanner.Scan() {
+				line := scanner.Text()
+				values := strings.Split(line, " ")
+				intermediate = append(intermediate, mr.KeyValue{Key: values[0], Value: values[1]})
+			}
+			sort.Sort(ByKey(intermediate))
+			i := 0
+			for i < len(intermediate) {
+				j := i + 1
+				for j < len(intermediate) && intermediate[j].Key == intermediate[i].Key {
+					j++
+				}
+				values := []string{}
+				for k := i; k < j; k++ {
+					values = append(values, intermediate[k].Value)
+				}
+				output := reducef(intermediate[i].Key, values)
+
+				writeRecord(outputFile, intermediate[i].Key, output)
+
+				i = j
+			}
+			outputFile.Close()
+		}(file, outputFile)
 	}
-	sort.Sort(ByKey(intermediate))
-	oname := "mr-out-0"
-	ofile, _ := os.Create(oname)
-
-	i := 0
-	for i < len(intermediate) {
-		j := i + 1
-		for j < len(intermediate) && intermediate[j].Key == intermediate[i].Key {
-			j++
-		}
-		values := []string{}
-		for k := i; k < j; k++ {
-			values = append(values, intermediate[k].Value)
-		}
-		output := reducef(intermediate[i].Key, values)
-
-		writeRecord(ofile, intermediate[i].Key, output)
-
-		i = j
-	}
-
-	ofile.Close()
+	wg.Wait()
 }
 
 // use ihash(key) % NReduce to choose the reduce

@@ -26,7 +26,7 @@ func main() {
 		ReduceFunction: reducef,
 	}
 
-	runtime := runtime.SequentialRuntime{}
+	runtime := runtime.MultithreadedRuntime{}
 
 	runtime.Run(&app)
 }
