@@ -13,6 +13,8 @@ import (
 )
 
 const BUCKETS = 10
+const OUTPUT_DIR = "../data/out/"
+const INTERMEDIATE_DIR = "../data/intermediate/"
 
 // for sorting by key.
 type ByKey []mr.KeyValue
@@ -54,7 +56,7 @@ func (r MultithreadedRuntime) callMap(mapf func(string, string) []mr.KeyValue, f
 
 	for index := 0; index < BUCKETS; index++ {
 		oname := fmt.Sprintf("intermediate-%d", index)
-		filepath := fmt.Sprintf("data/intermediate/%s", oname)
+		filepath := fmt.Sprintf("%s/%s", INTERMEDIATE_DIR, oname)
 		file, _ := os.Create(filepath)
 		files[index] = SyncedFile{File: file, Mutex: &sync.Mutex{}}
 	}
@@ -86,27 +88,18 @@ func (r MultithreadedRuntime) callReduce(reducef func(string, []string) string) 
 	// call Reduce on each distinct key in intermediate[],
 	// and print the result to mr-out-0.
 	//
-	dir := "data/intermediate/"
-	files, err := os.ReadDir(dir)
+	files, err := os.ReadDir(INTERMEDIATE_DIR)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	// outputFiles := make(map[int]SyncedFile)
-	// for index := 0; index < BUCKETS; index++ {
-	// 	oname := fmt.Sprintf("mr-out-%d", index)
-	// 	filepath := fmt.Sprintf("data/out/%s", oname)
-	// 	file, _ := os.Create(filepath)
-	// 	outputFiles[index] = SyncedFile{File: file, Mutex: &sync.Mutex{}}
-	// }
-
 	var wg sync.WaitGroup
 	for index, file := range files {
-		outputFile, _ := os.Create(fmt.Sprintf("data/out/mr-out-%d", index))
+		outputFile, _ := os.Create(fmt.Sprintf("%s/mr-out-%d", OUTPUT_DIR, index))
 		wg.Add(1)
 		go func(file os.DirEntry, outputFile *os.File) {
 			defer wg.Done()
-			fileHandle, _ := os.Open(dir + file.Name())
+			fileHandle, _ := os.Open(INTERMEDIATE_DIR + file.Name())
 			defer fileHandle.Close()
 
 			intermediate := []mr.KeyValue{}

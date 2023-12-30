@@ -1,2 +1,3 @@
 *.so
-src/data/intermediate
+data/out
+data/intermediate

@@ -43,7 +43,7 @@ func (r SequentialRuntime) callReduce(reducef func(string, []string) string, int
 	// and print the result to mr-out-0.
 	//
 
-	oname := "mr-out-0"
+	oname := "../data/out/mr-out-0"
 	ofile, _ := os.Create(oname)
 
 	i := 0
