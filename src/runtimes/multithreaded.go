@@ -1,43 +1,14 @@
 package runtimes
 
 import (
-	"bufio"
 	"fmt"
 	"hash/fnv"
 	"log"
 	mr "map-reduce/src/pkg"
 	"os"
 	"sort"
-	"strings"
 	"sync"
 )
-
-const BUCKETS = 10
-const OUTPUT_DIR = "../data/out/"
-const INTERMEDIATE_DIR = "../data/intermediate/"
-
-// for sorting by key.
-type ByKey []mr.KeyValue
-
-// for sorting by key.
-func (a ByKey) Len() int           { return len(a) }
-func (a ByKey) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
-func (a ByKey) Less(i, j int) bool { return a[i].Key < a[j].Key }
-
-type SyncedFile struct {
-	File  *os.File
-	Mutex *sync.Mutex
-}
-
-func (f SyncedFile) Write(key, value string) {
-	f.Mutex.Lock()
-	defer f.Mutex.Unlock()
-	writeRecord(f.File, key, value)
-}
-
-func (f SyncedFile) Close() {
-	f.File.Close()
-}
 
 type MultithreadedRuntime struct{}
 
@@ -47,26 +18,14 @@ func (r MultithreadedRuntime) Run(app *mr.MapReduceApp) {
 }
 
 func (r MultithreadedRuntime) callMap(mapf func(string, string) []mr.KeyValue, filenames []string) {
-	// read each input file,
-	// pass it to Map,
-	// accumulate the intermediate Map output.
-	//
-	// intermediate := []mr.KeyValue{}
-	files := make(map[int]SyncedFile)
-
-	for index := 0; index < BUCKETS; index++ {
-		oname := fmt.Sprintf("intermediate-%d", index)
-		filepath := fmt.Sprintf("%s/%s", INTERMEDIATE_DIR, oname)
-		file, _ := os.Create(filepath)
-		files[index] = SyncedFile{File: file, Mutex: &sync.Mutex{}}
-	}
+	files := mr.CreateOutputFiles(BUCKETS, INTERMEDIATE_DIR)
 
 	var wg sync.WaitGroup
 	for _, filename := range filenames {
 		wg.Add(1)
-		go func(filename string, files map[int]SyncedFile) {
+		go func(filename string, files map[int]mr.IntermediateFile) {
 			defer wg.Done()
-			content := readFile(filename)
+			content := mr.ReadFile(filename)
 			keyValues := mapf(filename, content)
 
 			for _, kv := range keyValues {
@@ -99,18 +58,9 @@ func (r MultithreadedRuntime) callReduce(reducef func(string, []string) string) 
 		wg.Add(1)
 		go func(file os.DirEntry, outputFile *os.File) {
 			defer wg.Done()
-			fileHandle, _ := os.Open(INTERMEDIATE_DIR + file.Name())
-			defer fileHandle.Close()
 
-			intermediate := []mr.KeyValue{}
-
-			scanner := bufio.NewScanner(fileHandle)
-			for scanner.Scan() {
-				line := scanner.Text()
-				values := strings.Split(line, " ")
-				intermediate = append(intermediate, mr.KeyValue{Key: values[0], Value: values[1]})
-			}
-			sort.Sort(ByKey(intermediate))
+			intermediate := mr.LoadDataFromIntermediateFile(INTERMEDIATE_DIR + file.Name())
+			sort.Sort(mr.ByKey(intermediate))
 			i := 0
 			for i < len(intermediate) {
 				j := i + 1
@@ -123,7 +73,7 @@ func (r MultithreadedRuntime) callReduce(reducef func(string, []string) string) 
 				}
 				output := reducef(intermediate[i].Key, values)
 
-				writeRecord(outputFile, intermediate[i].Key, output)
+				mr.WriteRecord(outputFile, intermediate[i].Key, output)
 
 				i = j
 			}

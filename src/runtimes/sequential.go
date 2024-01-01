@@ -12,7 +12,7 @@ type SequentialRuntime struct{}
 
 func (r SequentialRuntime) Run(app *mr.MapReduceApp) {
 	intermediate := r.callMap(app.MapFunction, app.InputFilenames)
-	sort.Sort(ByKey(intermediate))
+	sort.Sort(mr.ByKey(intermediate))
 	r.callReduce(app.ReduceFunction, intermediate)
 }
 
@@ -23,7 +23,7 @@ func (r SequentialRuntime) callMap(mapf func(string, string) []mr.KeyValue, file
 	//
 	intermediate := []mr.KeyValue{}
 	for _, filename := range filenames {
-		content := readFile(filename)
+		content := mr.ReadFile(filename)
 		kva := mapf(filename, content)
 
 		//
@@ -58,7 +58,7 @@ func (r SequentialRuntime) callReduce(reducef func(string, []string) string, int
 		}
 		output := reducef(intermediate[i].Key, values)
 
-		writeRecord(ofile, intermediate[i].Key, output)
+		mr.WriteRecord(ofile, intermediate[i].Key, output)
 
 		i = j
 	}
