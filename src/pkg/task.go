@@ -4,6 +4,7 @@ type Task struct {
 	Id     int
 	Phase  TaskPhase
 	Status TaskStatus
+	Args   Args
 }
 
 type TaskPhase int
@@ -21,3 +22,18 @@ const (
 	Success TaskStatus = 2
 	Failure TaskStatus = 3
 )
+
+type Args interface{}
+
+type MapArgs struct {
+	Filename string
+	Files    map[int]IntermediateFile
+}
+
+type ReduceArgs struct {
+	Index            int
+	IntermediateDir  string
+	OutputDir        string
+	IntermediateFile string
+	OutputFileName   string
+}

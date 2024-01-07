@@ -5,6 +5,8 @@ import (
 	"hash/fnv"
 	"log"
 	"net/rpc"
+	"os"
+	"sort"
 )
 
 // use ihash(key) % NReduce to choose the reduce
@@ -17,8 +19,47 @@ func ihash(key string) int {
 
 // main/mrworker.go calls this function.
 func Worker(mapf func(string, string) []KeyValue,
-	reducef func(string, []string) string, task Task, filename string, files map[int]IntermediateFile) {
+	reducef func(string, []string) string, task Task, filename string) {
 
+	switch task.Phase {
+	case MapPhase:
+		{
+			args := task.Args.(MapArgs)
+			content := ReadFile(args.Filename)
+			keyValues := mapf(filename, content)
+
+			for _, kv := range keyValues {
+				bucket := ihash(kv.Key) % BUCKETS
+				file := args.Files[bucket]
+				file.Write(kv.Key, kv.Value)
+			}
+		}
+	case ReducePhase:
+		{
+			args := task.Args.(ReduceArgs)
+			outputFile, _ := os.Create(fmt.Sprintf("%s/mr-out-%d", args.OutputDir, args.Index))
+			intermediate := LoadDataFromIntermediateFile(args.IntermediateDir + args.IntermediateFile)
+			sort.Sort(ByKey(intermediate))
+
+			i := 0
+			for i < len(intermediate) {
+				j := i + 1
+				for j < len(intermediate) && intermediate[j].Key == intermediate[i].Key {
+					j++
+				}
+				values := []string{}
+				for k := i; k < j; k++ {
+					values = append(values, intermediate[k].Value)
+				}
+				output := reducef(intermediate[i].Key, values)
+
+				WriteRecord(outputFile, intermediate[i].Key, output)
+
+				i = j
+			}
+			outputFile.Close()
+		}
+	}
 	// Your worker implementation here.
 
 	// uncomment to send the Example RPC to the coordinator.
