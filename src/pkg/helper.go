@@ -38,9 +38,8 @@ func (a ByKey) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 func (a ByKey) Less(i, j int) bool { return a[i].Key < a[j].Key }
 
 type IntermediateFile struct {
-	File   *os.File
-	Mutex  *sync.Mutex
-	buffer chan KeyValue
+	File  *os.File
+	Mutex *sync.Mutex
 }
 
 func (f IntermediateFile) Write(key, value string) {

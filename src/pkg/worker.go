@@ -19,52 +19,87 @@ func ihash(key string) int {
 
 // main/mrworker.go calls this function.
 func Worker(mapf func(string, string) []KeyValue,
-	reducef func(string, []string) string, task Task, filename string) {
+	reducef func(string, []string) string) {
+	registerWorker()
+	for true {
+		task := GetTask()
 
-	switch task.Phase {
-	case MapPhase:
-		{
-			args := task.Args.(MapArgs)
-			content := ReadFile(args.Filename)
-			keyValues := mapf(filename, content)
+		fmt.Print("Received task\n", task)
+		task.Status = Running
+		switch task.Phase {
+		case MapPhase:
+			{
+				args := task.Args.(MapArgs)
+				content := ReadFile(args.InputFile)
+				keyValues := mapf(args.InputFile, content)
 
-			for _, kv := range keyValues {
-				bucket := ihash(kv.Key) % BUCKETS
-				file := args.Files[bucket]
-				file.Write(kv.Key, kv.Value)
+				for _, kv := range keyValues {
+					bucket := ihash(kv.Key) % BUCKETS
+					file := args.IntermediateFiles[bucket]
+					file.Write(kv.Key, kv.Value)
+				}
+			}
+		case ReducePhase:
+			{
+				task.Status = Running
+				args := task.Args.(ReduceArgs)
+				outputFile, _ := os.Create(fmt.Sprintf("%s/mr-out-%d", args.OutputDir, args.Index))
+				intermediate := LoadDataFromIntermediateFile(args.IntermediateDir + args.IntermediateFile)
+				sort.Sort(ByKey(intermediate))
+
+				i := 0
+				for i < len(intermediate) {
+					j := i + 1
+					for j < len(intermediate) && intermediate[j].Key == intermediate[i].Key {
+						j++
+					}
+					values := []string{}
+					for k := i; k < j; k++ {
+						values = append(values, intermediate[k].Value)
+					}
+					output := reducef(intermediate[i].Key, values)
+
+					WriteRecord(outputFile, intermediate[i].Key, output)
+
+					i = j
+				}
+				outputFile.Close()
 			}
 		}
-	case ReducePhase:
-		{
-			args := task.Args.(ReduceArgs)
-			outputFile, _ := os.Create(fmt.Sprintf("%s/mr-out-%d", args.OutputDir, args.Index))
-			intermediate := LoadDataFromIntermediateFile(args.IntermediateDir + args.IntermediateFile)
-			sort.Sort(ByKey(intermediate))
+		task.Status = Success
 
-			i := 0
-			for i < len(intermediate) {
-				j := i + 1
-				for j < len(intermediate) && intermediate[j].Key == intermediate[i].Key {
-					j++
-				}
-				values := []string{}
-				for k := i; k < j; k++ {
-					values = append(values, intermediate[k].Value)
-				}
-				output := reducef(intermediate[i].Key, values)
-
-				WriteRecord(outputFile, intermediate[i].Key, output)
-
-				i = j
-			}
-			outputFile.Close()
-		}
+		SendTaskCompletion(task)
 	}
-	// Your worker implementation here.
+}
 
-	// uncomment to send the Example RPC to the coordinator.
-	// CallExample()
+func GetTask() Task {
+	args := NewTaskArgs{}
+	reply := NewTaskReply{}
+	call("Coordinator.SendTask", &args, &reply)
+	return Task{Id: reply.Id, Status: reply.Status, Phase: reply.Phase, Args: reply.Args}
+}
 
+func SendTaskCompletion(task Task) {
+	args := TaskStatusArgs{Id: task.Id, Status: task.Status, Phase: task.Phase}
+	reply := TaskStatusReply{}
+	call("Coordinator.GetTaskStatus", &args, &reply)
+
+	if !reply.Ok {
+		fmt.Println("Task completion failed")
+	}
+}
+
+func registerWorker() {
+	workerId := os.Getpid()
+	args := RegisterWorkerArgs{workerId}
+	reply := RegisterWorkerReply{}
+	call("Coordinator.RegisterWorker", &args, &reply)
+
+	if reply.Ok {
+		fmt.Printf("Worker %d registered successfully\n", workerId)
+	} else {
+		fmt.Printf("Worker %d registration failed\n", workerId)
+	}
 }
 
 // example function to show how to make an RPC call to the coordinator.

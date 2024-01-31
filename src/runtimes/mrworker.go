@@ -1,53 +1,38 @@
 package main
 
 //
-// simple sequential MapReduce.
+// start a worker process, which is implemented
+// in ../mr/worker.go. typically there will be
+// multiple worker processes, talking to one coordinator.
 //
-// go run mrsequential.go wc.so pg*.txt
+// go run mrworker.go wc.so
+//
+// Please do not change this file.
 //
 
 import (
+	"fmt"
 	"log"
 	mr "map-reduce/src/pkg"
-	runtime "map-reduce/src/runtimes"
 	"os"
 	"plugin"
 )
 
 func main() {
-	args := ParsedArgs{}
-	args.parse()
-
-	mapf, reducef := loadPlugin(args.PluginFilename)
-
-	app := mr.MapReduceApp{
-		InputFilenames: args.InputFilenames,
-		MapFunction:    mapf,
-		ReduceFunction: reducef,
+	if len(os.Args) != 2 {
+		fmt.Fprintf(os.Stderr, "Usage: mrworker xxx.so\n")
+		os.Exit(1)
 	}
 
-	runtime := runtime.DistributedRuntime{}
+	mapf, reducef := loadPlugin(os.Args[1])
 
-	runtime.Run(&app)
-}
-
-type ParsedArgs struct {
-	PluginFilename string
-	InputFilenames []string
-}
-
-func (p *ParsedArgs) parse() {
-	if len(os.Args) < 3 {
-		log.Fatalf("Usage: mrsequential xxx.so inputfiles...\n")
-	}
-
-	p.PluginFilename = os.Args[1]
-	p.InputFilenames = os.Args[2:]
+	mr.Worker(mapf, reducef)
 }
 
 // load the application Map and Reduce functions
 // from a plugin file, e.g. ../mrapps/wc.so
 func loadPlugin(filename string) (func(string, string) []mr.KeyValue, func(string, []string) string) {
+	fmt.Println("Loading plugin", filename)
 	p, err := plugin.Open(filename)
 	if err != nil {
 		log.Fatalf("cannot load plugin %v", filename)
