@@ -38,9 +38,10 @@ type NewTaskArgs struct {
 }
 
 type NewTaskReply struct {
-	Ok   bool
-	Type TaskType
-	Args map[string]string
+	Ok         bool
+	Type       TaskType
+	Args       map[string]string
+	WorkerDirs []string
 }
 
 type RegisterWorkerArgs struct {

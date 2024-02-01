@@ -64,6 +64,15 @@ func (c *Coordinator) mapTasksAreDone() bool {
 	return true
 }
 
+func (c *Coordinator) reduceTasksAreDone() bool {
+	for _, task := range c.reduceTasks {
+		if !task.IsSuccess() {
+			return false
+		}
+	}
+	return true
+}
+
 // creates a Coordinator and initializes all the Map & Reduce Tasks.
 // main/mrcoordinator.go calls this function.
 // nReduce is the number of reduce tasks to use.
@@ -96,13 +105,11 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 		outputFiles[index] = file
 
 		reduceTask := ReduceTask{
-			Id:               index,
-			Status:           NotStarted,
-			Index:            index,
-			IntermediateDir:  INTERMEDIATE_DIR,
-			OutputDir:        OUTPUT_DIR,
-			IntermediateFile: fmt.Sprintf("intermediate-%d", index),
-			OutputFileName:   oname,
+			Id:             index,
+			Status:         NotStarted,
+			Index:          index,
+			OutputDir:      OUTPUT_DIR,
+			OutputFileName: oname,
 		}
 
 		c.reduceTasks = append(c.reduceTasks, reduceTask)
@@ -194,26 +201,36 @@ func (c *Coordinator) SendTask(args *NewTaskArgs, reply *NewTaskReply) error {
 				return nil
 			}
 		}
+	} else if !c.reduceTasksAreDone() {
+		c.workerMutex.Lock()
+		defer c.workerMutex.Unlock()
+
+		c.Logger.Println("Map tasks are done - Fetching reduce task")
+		for _, task := range c.reduceTasks {
+			if task.Status == NotStarted {
+				c.Logger.Printf("Reduce task found %d", task.Id)
+				reply.Type = Reduce
+				reply.Ok = true
+				reply.Args = map[string]string{
+					"Id":        fmt.Sprintf("%d", task.Id),
+					"Index":     fmt.Sprintf("%d", task.Index),
+					"OutputDir": OUTPUT_DIR, "IntermediateFile": fmt.Sprintf("intermediate-%d", task.Index),
+					"OutputFileName": fmt.Sprintf("out-%d", task.Index),
+				}
+				reply.WorkerDirs = []string{}
+				for _, worker := range c.workers {
+					reply.WorkerDirs = append(reply.WorkerDirs, worker.WorkerDir)
+				}
+				return nil
+			}
+
+		}
 	} else {
+		c.Logger.Println("All tasks are done!")
 		reply.Ok = false
+		return nil
 	}
-	// else {
-	// 	c.logger.Println("Map tasks are done - Fetching reduce task")
-	// 	for _, task := range c.mapTasks {
-	// 		c.logger.Printf("Reduce task found %d", task.Id)
-	// 		if task.Status == NotStarted {
-	// 			c.logger.Printf("Reduce task found %d", task.Id)
-	// 			reply.Type = Reduce
-	// 			reply.Args = map[string]string{
-	// 				"Index":           fmt.Sprintf("%d", task.Index),
-	// 				"IntermediateDir": INTERMEDIATE_DIR,
-	// 				"OutputDir":       OUTPUT_DIR, "IntermediateFile": fmt.Sprintf("intermediate-%d", task.Index),
-	// 				"OutputFileName": fmt.Sprintf("out-%d", task.Index),
-	// 			}
-	// 			return nil
-	// 		}
-	// 	}
-	// }
+	reply.Ok = false
 	return nil
 }
 

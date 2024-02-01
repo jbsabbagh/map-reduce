@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/rpc"
 	"os"
+	"sort"
 	"strconv"
 	"time"
 )
@@ -93,38 +94,51 @@ func (w Worker) Run(
 				task := task.(ReduceTask)
 				task.Status = Running
 				w.Logger.Println("Received reduce task\n", task)
+				outputFile, _ := os.Create(task.OutputDir + task.OutputFileName)
+				defer outputFile.Close()
+				intermediate := w.loadDataFromIntermediateFiles(task.WorkerDirs, task.Index)
+				sort.Sort(ByKey(intermediate))
+
+				i := 0
+				for i < len(intermediate) {
+					j := i + 1
+					for j < len(intermediate) && intermediate[j].Key == intermediate[i].Key {
+						j++
+					}
+					values := []string{}
+					for k := i; k < j; k++ {
+						values = append(values, intermediate[k].Value)
+					}
+					output := reducef(intermediate[i].Key, values)
+
+					WriteRecord(outputFile, intermediate[i].Key, output)
+
+					i = j
+				}
+				w.Logger.Printf("Reduce task ID %d completed\n", task.Id)
+				task.SetStatus(Success)
+				w.sendTaskCompletion(task)
+
 			}
 		}
-		// case ReducePhase:
-		// 	{
-		// 		task.Status = Running
-		// 		args := task.Args.(ReduceArgs)
-		// 		outputFile, _ := os.Create(fmt.Sprintf("%s/mr-out-%d", args.OutputDir, args.Index))
-		// 		intermediate := LoadDataFromIntermediateFile(args.IntermediateDir + args.IntermediateFile)
-		// 		sort.Sort(ByKey(intermediate))
-
-		// 		i := 0
-		// 		for i < len(intermediate) {
-		// 			j := i + 1
-		// 			for j < len(intermediate) && intermediate[j].Key == intermediate[i].Key {
-		// 				j++
-		// 			}
-		// 			values := []string{}
-		// 			for k := i; k < j; k++ {
-		// 				values = append(values, intermediate[k].Value)
-		// 			}
-		// 			output := reducef(intermediate[i].Key, values)
-
-		// 			WriteRecord(outputFile, intermediate[i].Key, output)
-
-		// 			i = j
-		// 		}
-		// 		outputFile.Close()
-		// 	}
-		// }
-		// task.Status = Success
 	}
 
+}
+
+func (w Worker) loadDataFromIntermediateFiles(workerDirs []string, index int) []KeyValue {
+	intermediate := []KeyValue{}
+	for _, workerDir := range workerDirs {
+		dirs, _ := os.ReadDir(workerDir)
+
+		for _, dir := range dirs {
+
+			fileName := fmt.Sprintf("%s/%s/intermediate-%d", workerDir, dir.Name(), index)
+			w.Logger.Printf("Loading data from file %s", fileName)
+			keyValues := LoadDataFromIntermediateFile(fileName)
+			intermediate = append(intermediate, keyValues...)
+		}
+	}
+	return intermediate
 }
 
 func (w Worker) getTask() (Task, error) {
@@ -153,14 +167,13 @@ func (w Worker) getTask() (Task, error) {
 		id, _ := strconv.Atoi(args["Id"])
 		index, _ := strconv.Atoi(args["Index"])
 		task := ReduceTask{
-			Id:               id,
-			Status:           NotStarted,
-			Index:            index,
-			IntermediateDir:  args["IntermediateDir"],
-			OutputDir:        args["OutputDir"],
-			IntermediateFile: args["IntermediateFile"],
-			OutputFileName:   args["OutputFileName"],
-			Type:             Reduce,
+			Id:             id,
+			Status:         NotStarted,
+			Index:          index,
+			OutputDir:      args["OutputDir"],
+			OutputFileName: args["OutputFileName"],
+			WorkerDirs:     reply.WorkerDirs,
+			Type:           Reduce,
 		}
 		return task, nil
 	}

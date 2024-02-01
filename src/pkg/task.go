@@ -35,14 +35,13 @@ func (t *MapTask) SetStatus(status TaskStatus) {
 }
 
 type ReduceTask struct {
-	Id               int
-	Status           TaskStatus
-	Index            int
-	IntermediateDir  string
-	OutputDir        string
-	IntermediateFile string
-	OutputFileName   string
-	Type             TaskType
+	Id             int
+	Status         TaskStatus
+	Index          int
+	OutputDir      string
+	OutputFileName string
+	WorkerDirs     []string
+	Type           TaskType
 }
 
 func (t ReduceTask) IsSuccess() bool {
