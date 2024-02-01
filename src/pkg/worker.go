@@ -26,7 +26,7 @@ func MakeWorker(buckets int) Worker {
 		Status:    Idle,
 		Buckets:   buckets,
 		WorkerDir: fmt.Sprintf("/tmp/%d", os.Getpid()),
-		Logger:    log.New(os.Stdout, "Worker: ", log.Lshortfile|log.Ltime|log.Ldate),
+		Logger:    log.New(os.Stdout, fmt.Sprintf("Worker %d: ", os.Getpid()), log.Lshortfile|log.Ltime|log.Ldate),
 	}
 	worker.Logger.Printf("Setting up Worker with ID %d", worker.Id)
 	worker.setUp()

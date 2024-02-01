@@ -184,11 +184,15 @@ func (c *Coordinator) GetTaskStatus(args *TaskStatusArgs, reply *TaskStatusReply
 }
 
 func (c *Coordinator) SendTask(args *NewTaskArgs, reply *NewTaskReply) error {
+	c.taskMutex.Lock()
+	defer c.taskMutex.Unlock()
+
 	c.Logger.Println("Task requested")
 	if !c.mapTasksAreDone() {
 		c.Logger.Println("Map tasks are not done - Fetching map task")
-		for _, task := range c.mapTasks {
+		for index, task := range c.mapTasks {
 			if task.Status == NotStarted {
+				c.mapTasks[index].SetStatus(Running)
 				fmt.Printf("Map task found %d\n", task.Id)
 				reply.Type = Map
 				reply.Ok = true
@@ -206,8 +210,9 @@ func (c *Coordinator) SendTask(args *NewTaskArgs, reply *NewTaskReply) error {
 		defer c.workerMutex.Unlock()
 
 		c.Logger.Println("Map tasks are done - Fetching reduce task")
-		for _, task := range c.reduceTasks {
+		for index, task := range c.reduceTasks {
 			if task.Status == NotStarted {
+				c.reduceTasks[index].SetStatus(Running)
 				c.Logger.Printf("Reduce task found %d", task.Id)
 				reply.Type = Reduce
 				reply.Ok = true
