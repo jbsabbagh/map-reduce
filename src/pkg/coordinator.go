@@ -12,7 +12,7 @@ import (
 
 type Coordinator struct {
 	Logger      *log.Logger
-	workers     []worker
+	workers     []Worker
 	mapTasks    []MapTask
 	reduceTasks []ReduceTask
 	taskMutex   *sync.Mutex
@@ -44,13 +44,13 @@ func (c *Coordinator) Done() bool {
 		}
 	}
 
-	// for _, task := range c.reduceTasks {
-	// 	if !task.IsSuccess() {
-	// 		return false
-	// 	}
+	for _, task := range c.reduceTasks {
+		if !task.IsSuccess() {
+			return false
+		}
 
-	// }
-	log.Println("All tasks are done!")
+	}
+	c.Logger.Println("All tasks are done!")
 	return true
 
 }
@@ -71,8 +71,8 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c := Coordinator{
 		mapTasks:    make([]MapTask, 0),
 		reduceTasks: make([]ReduceTask, 0),
-		workers:     []worker{},
-		Logger:      log.New(os.Stdout, "Coordinator: ", log.Lshortfile),
+		workers:     []Worker{},
+		Logger:      log.New(os.Stdout, "Coordinator: ", log.Lshortfile|log.Ltime|log.Ldate),
 		taskMutex:   &sync.Mutex{},
 		workerMutex: &sync.Mutex{},
 	}
@@ -221,14 +221,14 @@ func (c *Coordinator) RegisterWorker(args *RegisterWorkerArgs, reply *RegisterWo
 	c.workerMutex.Lock()
 	defer c.workerMutex.Unlock()
 
-	workerId := args.WorkerId
-	c.workers = append(c.workers, worker{workerId, "idle"})
+	worker := Worker{
+		Id:        args.Id,
+		Status:    args.Status,
+		Buckets:   args.Buckets,
+		WorkerDir: args.WorkerDir,
+	}
+	c.workers = append(c.workers, worker)
 	reply.Ok = true
 
 	return nil
-}
-
-type worker struct {
-	id     int
-	status string
 }

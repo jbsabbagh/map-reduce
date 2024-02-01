@@ -18,23 +18,44 @@ func ihash(key string) int {
 	return int(h.Sum32() & 0x7fffffff)
 }
 
-// main/mrworker.go calls this function.
-func Worker(mapf func(string, string) []KeyValue,
-	reducef func(string, []string) string) {
-	pid := os.Getpid()
-	workerDir := fmt.Sprintf("/tmp/%d", pid)
-	err := os.Mkdir(workerDir, 0755)
-	if err != nil {
-		log.Fatal("Error creating worker directory", err)
+// Helper function to make a worker and trigger set up
+func MakeWorker(buckets int) Worker {
+	worker := Worker{
+		Id:        os.Getpid(),
+		Status:    Idle,
+		Buckets:   buckets,
+		WorkerDir: fmt.Sprintf("/tmp/%d", os.Getpid()),
+		Logger:    log.New(os.Stdout, "Worker: ", log.Lshortfile|log.Ltime|log.Ldate),
 	}
+	worker.Logger.Printf("Setting up Worker with ID %d", worker.Id)
+	worker.setUp()
+	return worker
+}
 
-	registerWorker()
+type WorkerStatus int
 
+const (
+	Idle        WorkerStatus = 0
+	RunningTask WorkerStatus = iota
+)
+
+type Worker struct {
+	Id           int
+	Status       WorkerStatus
+	AssignedTask Task
+	Buckets      int
+	WorkerDir    string
+	Logger       *log.Logger
+}
+
+func (w Worker) Run(
+	mapf func(string, string) []KeyValue,
+	reducef func(string, []string) string) {
 	for true {
-		task, err := GetTask()
+		task, err := w.getTask()
 
 		if err != nil {
-			log.Println("No Tasks Found - Sleeping")
+			w.Logger.Println("No Tasks Found - Sleeping")
 			time.Sleep(time.Second)
 			continue
 		}
@@ -44,14 +65,14 @@ func Worker(mapf func(string, string) []KeyValue,
 			{
 				task := task.(MapTask)
 				task.Status = Running
-				log.Printf("Received map task ID %d\n", task.Id)
+				w.Logger.Printf("Received map task ID %d\n", task.Id)
 
-				intermediateDir := fmt.Sprintf("%s/%d", workerDir, task.Id)
+				intermediateDir := fmt.Sprintf("%s/%d", w.WorkerDir, task.Id)
 
 				err := os.Mkdir(intermediateDir, 0755)
 				if err != nil {
-					log.Printf("Error creating intermediate directory for Task ID %d", task.Id)
-					log.Fatal(err)
+					w.Logger.Printf("Error creating intermediate directory for Task ID %d", task.Id)
+					w.Logger.Fatal(err)
 				}
 
 				files := CreateOutputFiles(BUCKETS, intermediateDir)
@@ -63,15 +84,15 @@ func Worker(mapf func(string, string) []KeyValue,
 					file.Write(kv.Key, kv.Value)
 
 				}
-				log.Printf("Map task ID %d completed\n", task.Id)
+				w.Logger.Printf("Map task ID %d completed\n", task.Id)
 				task.SetStatus(Success)
-				SendTaskCompletion(task)
+				w.sendTaskCompletion(task)
 			}
 		case Reduce:
 			{
 				task := task.(ReduceTask)
 				task.Status = Running
-				log.Println("Received reduce task\n", task)
+				w.Logger.Println("Received reduce task\n", task)
 			}
 		}
 		// case ReducePhase:
@@ -103,12 +124,13 @@ func Worker(mapf func(string, string) []KeyValue,
 		// }
 		// task.Status = Success
 	}
+
 }
 
-func GetTask() (Task, error) {
+func (w Worker) getTask() (Task, error) {
 	args := NewTaskArgs{}
 	reply := NewTaskReply{}
-	call("Coordinator.SendTask", &args, &reply)
+	w.call("Coordinator.SendTask", &args, &reply)
 	if !reply.Ok {
 		return nil, fmt.Errorf("Failed to get task")
 	}
@@ -145,68 +167,57 @@ func GetTask() (Task, error) {
 	return nil, fmt.Errorf("Unknown task type")
 }
 
-func SendTaskCompletion(task Task) {
+func (w Worker) setUp() {
+
+	w.Logger.Printf("Creating worker directory %s", w.WorkerDir)
+	err := os.Mkdir(w.WorkerDir, 0755)
+	if err != nil {
+		w.Logger.Fatal("Error creating worker directory", err)
+	}
+
+	w.registerWorker()
+}
+
+func (w Worker) registerWorker() {
+	workerId := w.Id
+	args := RegisterWorkerArgs{
+		Id:        workerId,
+		Status:    Idle,
+		Buckets:   w.Buckets,
+		WorkerDir: w.WorkerDir,
+	}
+	reply := RegisterWorkerReply{}
+	w.call("Coordinator.RegisterWorker", &args, &reply)
+
+	if reply.Ok {
+		w.Logger.Printf("Worker %d registered successfully\n", workerId)
+	} else {
+		w.Logger.Printf("Worker %d registration failed\n", workerId)
+	}
+}
+
+func (w Worker) sendTaskCompletion(task Task) {
 	args := TaskStatusArgs{
 		Id:     task.GetId(),
 		Status: task.GetStatus(),
 		Type:   task.GetTaskType(),
 	}
 	reply := TaskStatusReply{}
-	call("Coordinator.GetTaskStatus", &args, &reply)
+	w.call("Coordinator.GetTaskStatus", &args, &reply)
 
 	if !reply.Ok {
-		fmt.Println("Task completion failed")
-	}
-}
-
-func registerWorker() {
-	workerId := os.Getpid()
-	args := RegisterWorkerArgs{workerId}
-	reply := RegisterWorkerReply{}
-	call("Coordinator.RegisterWorker", &args, &reply)
-
-	if reply.Ok {
-		fmt.Printf("Worker %d registered successfully\n", workerId)
-	} else {
-		fmt.Printf("Worker %d registration failed\n", workerId)
-	}
-}
-
-// example function to show how to make an RPC call to the coordinator.
-//
-// the RPC argument and reply types are defined in rpc.go.
-func CallExample() {
-
-	// declare an argument structure.
-	args := ExampleArgs{}
-
-	// fill in the argument(s).
-	args.X = 99
-
-	// declare a reply structure.
-	reply := ExampleReply{}
-
-	// send the RPC request, wait for the reply.
-	// the "Coordinator.Example" tells the
-	// receiving server that we'd like to call
-	// the Example() method of struct Coordinator.
-	ok := call("Coordinator.Example", &args, &reply)
-	if ok {
-		// reply.Y should be 100.
-		fmt.Printf("reply.Y %v\n", reply.Y)
-	} else {
-		fmt.Printf("call failed!\n")
+		w.Logger.Println("Notification to the Coordinator failed")
 	}
 }
 
 // send an RPC request to the coordinator, wait for the response.
 // usually returns true.
 // returns false if something goes wrong.
-func call(rpcname string, args interface{}, reply interface{}) bool {
+func (w Worker) call(rpcname string, args interface{}, reply interface{}) bool {
 	sockname := coordinatorSock()
 	c, err := rpc.DialHTTP("unix", sockname)
 	if err != nil {
-		log.Fatal("dialing:", err)
+		w.Logger.Fatal("dialing:", err)
 	}
 	defer c.Close()
 
@@ -215,6 +226,6 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 		return true
 	}
 
-	fmt.Println(err)
+	w.Logger.Println(err)
 	return false
 }

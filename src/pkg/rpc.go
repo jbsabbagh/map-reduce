@@ -44,7 +44,10 @@ type NewTaskReply struct {
 }
 
 type RegisterWorkerArgs struct {
-	WorkerId int
+	Id        int
+	Status    WorkerStatus
+	Buckets   int
+	WorkerDir string
 }
 
 type RegisterWorkerReply struct {
