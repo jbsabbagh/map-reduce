@@ -6,9 +6,9 @@ TIMEOUT=$"gtimeout -k 2s 30s"
 
 start=$(date +%s)
 echo "Running test..."
-go build -buildmode=plugin apps/wordcount/wc.go
-go build runtimes/mrcoordinator.go
-go build runtimes/mrworker.go
+go build -race -buildmode=plugin apps/wordcount/wc.go
+go build -race runtimes/mrcoordinator.go
+go build -race runtimes/mrworker.go
 $TIMEOUT ./mrcoordinator ../data/pg-*.txt &
 $TIMEOUT ./mrworker wc.so &
 # $TIMEOUT ./mrworker wc.so &

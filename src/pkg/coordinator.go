@@ -7,13 +7,16 @@ import (
 	"net/http"
 	"net/rpc"
 	"os"
+	"sync"
 )
 
 type Coordinator struct {
+	Logger      *log.Logger
 	workers     []worker
 	mapTasks    []MapTask
 	reduceTasks []ReduceTask
-	Logger      *log.Logger
+	taskMutex   *sync.Mutex
+	workerMutex *sync.Mutex
 }
 
 // start a thread that listens for RPCs from worker.go
@@ -32,6 +35,9 @@ func (c *Coordinator) server() {
 // main/mrcoordinator.go calls Done() periodically to find out
 // if the entire job has finished.
 func (c *Coordinator) Done() bool {
+	c.taskMutex.Lock()
+	defer c.taskMutex.Unlock()
+
 	for _, task := range c.mapTasks {
 		if !task.IsSuccess() {
 			return false
@@ -67,6 +73,8 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 		reduceTasks: make([]ReduceTask, 0),
 		workers:     []worker{},
 		Logger:      log.New(os.Stdout, "Coordinator: ", log.Lshortfile),
+		taskMutex:   &sync.Mutex{},
+		workerMutex: &sync.Mutex{},
 	}
 
 	for index, file := range files {
@@ -105,7 +113,14 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	return &c
 }
 
+// DisplayStatistics prints the current status of the coordinator
 func (c *Coordinator) DisplayStatistics() {
+
+	// TODO: This can be inefficient as we are locking the mutex for the entire duration of the function
+	// Look into RWMutex + tradeoffs
+	c.workerMutex.Lock()
+	defer c.workerMutex.Unlock()
+
 	completedTasks := 0
 	totalTasks := len(c.mapTasks) + len(c.reduceTasks)
 
@@ -129,6 +144,9 @@ func (c *Coordinator) DisplayStatistics() {
 }
 
 func (c *Coordinator) GetTaskStatus(args *TaskStatusArgs, reply *TaskStatusReply) error {
+	c.taskMutex.Lock()
+	defer c.taskMutex.Unlock()
+
 	id := args.Id
 	taskType := args.Type
 	reply.Ok = true
@@ -200,6 +218,9 @@ func (c *Coordinator) SendTask(args *NewTaskArgs, reply *NewTaskReply) error {
 }
 
 func (c *Coordinator) RegisterWorker(args *RegisterWorkerArgs, reply *RegisterWorkerReply) error {
+	c.workerMutex.Lock()
+	defer c.workerMutex.Unlock()
+
 	workerId := args.WorkerId
 	c.workers = append(c.workers, worker{workerId, "idle"})
 	reply.Ok = true
