@@ -1,18 +1,37 @@
 package mr
 
-type Task struct {
-	Id     int
-	Phase  TaskPhase
-	Status TaskStatus
-	Args   Args
+type Task interface {
+	IsSuccess() bool
+	GetTaskType() TaskType
+	GetId() int
+	GetStatus() TaskStatus
+}
+type MapTask struct {
+	Id        int
+	Status    TaskStatus
+	InputFile string
+	Index     int
+	Type      TaskType
 }
 
-type MapTask struct {
-	Id                int
-	Status            TaskStatus
-	InputFile         string
-	IntermediateFiles map[int]IntermediateFile
-	Index             int
+func (t MapTask) IsSuccess() bool {
+	return t.Status == Success
+}
+
+func (t MapTask) GetId() int {
+	return t.Id
+}
+
+func (t MapTask) GetStatus() TaskStatus {
+	return t.Status
+}
+
+func (t MapTask) GetTaskType() TaskType {
+	return t.Type
+}
+
+func (t *MapTask) SetStatus(status TaskStatus) {
+	t.Status = status
 }
 
 type ReduceTask struct {
@@ -23,17 +42,34 @@ type ReduceTask struct {
 	OutputDir        string
 	IntermediateFile string
 	OutputFileName   string
+	Type             TaskType
 }
 
-func (t *Task) IsSuccess() bool {
+func (t ReduceTask) IsSuccess() bool {
 	return t.Status == Success
 }
 
-type TaskPhase int
+func (t ReduceTask) GetId() int {
+	return t.Id
+}
+
+func (t ReduceTask) GetStatus() TaskStatus {
+	return t.Status
+}
+
+func (t *ReduceTask) SetStatus(status TaskStatus) {
+	t.Status = status
+}
+
+func (t ReduceTask) GetTaskType() TaskType {
+	return t.Type
+}
+
+type TaskType int
 
 const (
-	MapPhase    TaskPhase = 0
-	ReducePhase TaskPhase = 1
+	Map    TaskType = 0
+	Reduce TaskType = 1
 )
 
 type TaskStatus int

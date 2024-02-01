@@ -1,57 +1,56 @@
 package mr
 
 import (
-	"encoding/gob"
 	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"net/rpc"
 	"os"
-	"sync"
 )
 
 type Coordinator struct {
-	workers []worker
-	tasks   map[string][]Task
+	workers     []worker
+	mapTasks    []MapTask
+	reduceTasks []ReduceTask
+	Logger      *log.Logger
 }
 
 // start a thread that listens for RPCs from worker.go
 func (c *Coordinator) server() {
-	c.registerTypes()
 	rpc.Register(c)
 	rpc.HandleHTTP()
 	sockname := coordinatorSock()
 	os.Remove(sockname)
 	l, e := net.Listen("unix", sockname)
 	if e != nil {
-		log.Fatal("listen error:", e)
+		c.Logger.Fatal("listen error:", e)
 	}
 	go http.Serve(l, nil)
-}
-
-func (c *Coordinator) registerTypes() {
-	gob.Register(Task{})
-	gob.Register(MapArgs{})
-	gob.Register(ReduceArgs{})
-	gob.Register(IntermediateFile{})
 }
 
 // main/mrcoordinator.go calls Done() periodically to find out
 // if the entire job has finished.
 func (c *Coordinator) Done() bool {
-	for _, taskType := range c.tasks {
-		for _, task := range taskType {
-			if !task.IsSuccess() {
-				return false
-			}
+	for _, task := range c.mapTasks {
+		if !task.IsSuccess() {
+			return false
 		}
 	}
+
+	// for _, task := range c.reduceTasks {
+	// 	if !task.IsSuccess() {
+	// 		return false
+	// 	}
+
+	// }
+	log.Println("All tasks are done!")
 	return true
+
 }
 
 func (c *Coordinator) mapTasksAreDone() bool {
-	for _, task := range c.tasks["map"] {
+	for _, task := range c.mapTasks {
 		if !task.IsSuccess() {
 			return false
 		}
@@ -64,22 +63,21 @@ func (c *Coordinator) mapTasksAreDone() bool {
 // nReduce is the number of reduce tasks to use.
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c := Coordinator{
-		tasks:   make(map[string][]Task),
-		workers: []worker{},
+		mapTasks:    make([]MapTask, 0),
+		reduceTasks: make([]ReduceTask, 0),
+		workers:     []worker{},
+		Logger:      log.New(os.Stdout, "Coordinator: ", log.Lshortfile),
 	}
 
-	intermediateFiles := make(map[int]IntermediateFile)
-	c.tasks["map"] = []Task{}
-	c.tasks["reduce"] = []Task{}
-
 	for index, file := range files {
-		intermediateFileName := fmt.Sprintf("intermediate-%d", index)
-		intermediateFilepath := fmt.Sprintf("%s/%s", INTERMEDIATE_DIR, intermediateFileName)
-		intermediateFile, _ := os.Create(intermediateFilepath)
-		intermediateFiles[index] = IntermediateFile{File: intermediateFile, Mutex: &sync.Mutex{}}
 
-		mapTask := Task{Id: index, Phase: MapPhase, Status: NotStarted, Args: MapArgs{InputFile: file, IntermediateFiles: intermediateFiles, Index: index}}
-		c.tasks["map"] = append(c.tasks["map"], mapTask)
+		mapTask := MapTask{
+			Id:        index,
+			Status:    NotStarted,
+			InputFile: file,
+			Index:     index,
+		}
+		c.mapTasks = append(c.mapTasks, mapTask)
 	}
 
 	outputFiles := make(map[int]*os.File)
@@ -89,9 +87,17 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 		file, _ := os.Create(filepath)
 		outputFiles[index] = file
 
-		reduceTask := Task{Id: index, Phase: ReducePhase, Status: NotStarted, Args: ReduceArgs{Index: index, IntermediateDir: INTERMEDIATE_DIR, OutputDir: OUTPUT_DIR, IntermediateFile: fmt.Sprintf("intermediate-%d", index), OutputFileName: oname}}
+		reduceTask := ReduceTask{
+			Id:               index,
+			Status:           NotStarted,
+			Index:            index,
+			IntermediateDir:  INTERMEDIATE_DIR,
+			OutputDir:        OUTPUT_DIR,
+			IntermediateFile: fmt.Sprintf("intermediate-%d", index),
+			OutputFileName:   oname,
+		}
 
-		c.tasks["reduce"] = append(c.tasks["reduce"], reduceTask)
+		c.reduceTasks = append(c.reduceTasks, reduceTask)
 
 	}
 
@@ -99,47 +105,52 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	return &c
 }
 
-func (c *Coordinator) Run() {
+func (c *Coordinator) DisplayStatistics() {
 	completedTasks := 0
-	totalTasks := len(c.tasks["map"]) + len(c.tasks["reduce"])
+	totalTasks := len(c.mapTasks) + len(c.reduceTasks)
 
-	for _, task := range c.tasks["map"] {
+	for _, task := range c.mapTasks {
 		if task.IsSuccess() {
 			completedTasks++
 		}
 	}
 
-	for _, task := range c.tasks["reduce"] {
+	for _, task := range c.reduceTasks {
 		if task.IsSuccess() {
 			completedTasks++
 		}
 	}
-	fmt.Println("Coordinator status:")
+	c.Logger.Println("Coordinator status:")
 	for _, worker := range c.workers {
-		fmt.Println(worker)
-		fmt.Printf("Completed tasks %d\n", completedTasks)
-		fmt.Printf("Total tasks %d\n", totalTasks)
+		c.Logger.Println(worker)
+		c.Logger.Printf("Completed tasks %d", completedTasks)
+		c.Logger.Printf("Total tasks %d", totalTasks)
 	}
 }
 
 func (c *Coordinator) GetTaskStatus(args *TaskStatusArgs, reply *TaskStatusReply) error {
 	id := args.Id
-	phase := args.Phase
+	taskType := args.Type
 	reply.Ok = true
-	switch phase {
-	case MapPhase:
+
+	c.Logger.Printf("Received task status for id %d", id)
+	switch taskType {
+	case Map:
 		{
-			for _, task := range c.tasks["map"] {
-				if task.Id == id {
-					task.Status = args.Status
+			for index := range c.mapTasks {
+				if c.mapTasks[index].Id == id {
+					c.mapTasks[index].SetStatus(args.Status) // Set the status of the task
+					c.Logger.Printf("Map task status updated %d to Success!", id)
 				}
 			}
+
 		}
-	case ReducePhase:
+	case Reduce:
 		{
-			for _, task := range c.tasks["reduce"] {
-				if task.Id == id {
-					task.Status = args.Status
+			for index := range c.reduceTasks {
+				if c.reduceTasks[index].Id == id {
+					c.reduceTasks[index].SetStatus(args.Status) // Set the status of the task
+					c.Logger.Printf("Reduce task status updated %d to Success!", id)
 				}
 			}
 		}
@@ -148,33 +159,43 @@ func (c *Coordinator) GetTaskStatus(args *TaskStatusArgs, reply *TaskStatusReply
 }
 
 func (c *Coordinator) SendTask(args *NewTaskArgs, reply *NewTaskReply) error {
-	fmt.Println("Task requested")
+	c.Logger.Println("Task requested")
 	if !c.mapTasksAreDone() {
-		fmt.Println("Map tasks are not done - Fetching map task")
-		for _, task := range c.tasks["map"] {
+		c.Logger.Println("Map tasks are not done - Fetching map task")
+		for _, task := range c.mapTasks {
 			if task.Status == NotStarted {
 				fmt.Printf("Map task found %d\n", task.Id)
-				reply.Id = task.Id
-				reply.Phase = task.Phase
-				reply.Status = task.Status
-				reply.Args = task.Args
+				reply.Type = Map
+				reply.Ok = true
+				reply.Args = map[string]string{
+					"InputFile": task.InputFile,
+					"Index":     fmt.Sprintf("%d", task.Index),
+					"Id":        fmt.Sprintf("%d", task.Id),
+				}
+
 				return nil
 			}
 		}
 	} else {
-		fmt.Println("Map tasks are done - Fetching reduce task")
-		for _, task := range c.tasks["reduce"] {
-			fmt.Printf("Reduce task found %d", task.Id)
-			if task.Status == NotStarted {
-				fmt.Printf("Reduce task found %d", task.Id)
-				reply.Id = task.Id
-				reply.Phase = task.Phase
-				reply.Status = task.Status
-				reply.Args = task.Args
-				return nil
-			}
-		}
+		reply.Ok = false
 	}
+	// else {
+	// 	c.logger.Println("Map tasks are done - Fetching reduce task")
+	// 	for _, task := range c.mapTasks {
+	// 		c.logger.Printf("Reduce task found %d", task.Id)
+	// 		if task.Status == NotStarted {
+	// 			c.logger.Printf("Reduce task found %d", task.Id)
+	// 			reply.Type = Reduce
+	// 			reply.Args = map[string]string{
+	// 				"Index":           fmt.Sprintf("%d", task.Index),
+	// 				"IntermediateDir": INTERMEDIATE_DIR,
+	// 				"OutputDir":       OUTPUT_DIR, "IntermediateFile": fmt.Sprintf("intermediate-%d", task.Index),
+	// 				"OutputFileName": fmt.Sprintf("out-%d", task.Index),
+	// 			}
+	// 			return nil
+	// 		}
+	// 	}
+	// }
 	return nil
 }
 

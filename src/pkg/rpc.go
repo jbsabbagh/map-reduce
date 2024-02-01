@@ -27,7 +27,7 @@ type ExampleReply struct {
 type TaskStatusArgs struct {
 	Id     int
 	Status TaskStatus
-	Phase  TaskPhase
+	Type   TaskType
 }
 
 type TaskStatusReply struct {
@@ -38,10 +38,9 @@ type NewTaskArgs struct {
 }
 
 type NewTaskReply struct {
-	Id     int
-	Status TaskStatus
-	Phase  TaskPhase
-	Args   Args
+	Ok   bool
+	Type TaskType
+	Args map[string]string
 }
 
 type RegisterWorkerArgs struct {

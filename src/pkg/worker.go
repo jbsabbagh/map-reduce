@@ -6,7 +6,8 @@ import (
 	"log"
 	"net/rpc"
 	"os"
-	"sort"
+	"strconv"
+	"time"
 )
 
 // use ihash(key) % NReduce to choose the reduce
@@ -20,67 +21,136 @@ func ihash(key string) int {
 // main/mrworker.go calls this function.
 func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
+	pid := os.Getpid()
+	workerDir := fmt.Sprintf("/tmp/%d", pid)
+	err := os.Mkdir(workerDir, 0755)
+	if err != nil {
+		log.Fatal("Error creating worker directory", err)
+	}
+
 	registerWorker()
+
 	for true {
-		task := GetTask()
+		task, err := GetTask()
 
-		fmt.Print("Received task\n", task)
-		task.Status = Running
-		switch task.Phase {
-		case MapPhase:
+		if err != nil {
+			log.Println("No Tasks Found - Sleeping")
+			time.Sleep(time.Second)
+			continue
+		}
+
+		switch task.GetTaskType() {
+		case Map:
 			{
-				args := task.Args.(MapArgs)
-				content := ReadFile(args.InputFile)
-				keyValues := mapf(args.InputFile, content)
+				task := task.(MapTask)
+				task.Status = Running
+				log.Printf("Received map task ID %d\n", task.Id)
 
+				intermediateDir := fmt.Sprintf("%s/%d", workerDir, task.Id)
+
+				err := os.Mkdir(intermediateDir, 0755)
+				if err != nil {
+					log.Printf("Error creating intermediate directory for Task ID %d", task.Id)
+					log.Fatal(err)
+				}
+
+				files := CreateOutputFiles(BUCKETS, intermediateDir)
+				content := ReadFile(task.InputFile)
+				keyValues := mapf(task.InputFile, content)
 				for _, kv := range keyValues {
 					bucket := ihash(kv.Key) % BUCKETS
-					file := args.IntermediateFiles[bucket]
+					file := files[bucket]
 					file.Write(kv.Key, kv.Value)
+
 				}
+				log.Printf("Map task ID %d completed\n", task.Id)
+				task.SetStatus(Success)
+				SendTaskCompletion(task)
 			}
-		case ReducePhase:
+		case Reduce:
 			{
+				task := task.(ReduceTask)
 				task.Status = Running
-				args := task.Args.(ReduceArgs)
-				outputFile, _ := os.Create(fmt.Sprintf("%s/mr-out-%d", args.OutputDir, args.Index))
-				intermediate := LoadDataFromIntermediateFile(args.IntermediateDir + args.IntermediateFile)
-				sort.Sort(ByKey(intermediate))
-
-				i := 0
-				for i < len(intermediate) {
-					j := i + 1
-					for j < len(intermediate) && intermediate[j].Key == intermediate[i].Key {
-						j++
-					}
-					values := []string{}
-					for k := i; k < j; k++ {
-						values = append(values, intermediate[k].Value)
-					}
-					output := reducef(intermediate[i].Key, values)
-
-					WriteRecord(outputFile, intermediate[i].Key, output)
-
-					i = j
-				}
-				outputFile.Close()
+				log.Println("Received reduce task\n", task)
 			}
 		}
-		task.Status = Success
+		// case ReducePhase:
+		// 	{
+		// 		task.Status = Running
+		// 		args := task.Args.(ReduceArgs)
+		// 		outputFile, _ := os.Create(fmt.Sprintf("%s/mr-out-%d", args.OutputDir, args.Index))
+		// 		intermediate := LoadDataFromIntermediateFile(args.IntermediateDir + args.IntermediateFile)
+		// 		sort.Sort(ByKey(intermediate))
 
-		SendTaskCompletion(task)
+		// 		i := 0
+		// 		for i < len(intermediate) {
+		// 			j := i + 1
+		// 			for j < len(intermediate) && intermediate[j].Key == intermediate[i].Key {
+		// 				j++
+		// 			}
+		// 			values := []string{}
+		// 			for k := i; k < j; k++ {
+		// 				values = append(values, intermediate[k].Value)
+		// 			}
+		// 			output := reducef(intermediate[i].Key, values)
+
+		// 			WriteRecord(outputFile, intermediate[i].Key, output)
+
+		// 			i = j
+		// 		}
+		// 		outputFile.Close()
+		// 	}
+		// }
+		// task.Status = Success
 	}
 }
 
-func GetTask() Task {
+func GetTask() (Task, error) {
 	args := NewTaskArgs{}
 	reply := NewTaskReply{}
 	call("Coordinator.SendTask", &args, &reply)
-	return Task{Id: reply.Id, Status: reply.Status, Phase: reply.Phase, Args: reply.Args}
+	if !reply.Ok {
+		return nil, fmt.Errorf("Failed to get task")
+	}
+
+	switch reply.Type {
+	case Map:
+		args := reply.Args
+		id, _ := strconv.Atoi(args["Id"])
+		index, _ := strconv.Atoi(args["Index"])
+		task := MapTask{
+			Id:        id,
+			Status:    NotStarted,
+			InputFile: args["InputFile"],
+			Index:     index,
+			Type:      Map,
+		}
+		return task, nil
+	case Reduce:
+		args := reply.Args
+		id, _ := strconv.Atoi(args["Id"])
+		index, _ := strconv.Atoi(args["Index"])
+		task := ReduceTask{
+			Id:               id,
+			Status:           NotStarted,
+			Index:            index,
+			IntermediateDir:  args["IntermediateDir"],
+			OutputDir:        args["OutputDir"],
+			IntermediateFile: args["IntermediateFile"],
+			OutputFileName:   args["OutputFileName"],
+			Type:             Reduce,
+		}
+		return task, nil
+	}
+	return nil, fmt.Errorf("Unknown task type")
 }
 
 func SendTaskCompletion(task Task) {
-	args := TaskStatusArgs{Id: task.Id, Status: task.Status, Phase: task.Phase}
+	args := TaskStatusArgs{
+		Id:     task.GetId(),
+		Status: task.GetStatus(),
+		Type:   task.GetTaskType(),
+	}
 	reply := TaskStatusReply{}
 	call("Coordinator.GetTaskStatus", &args, &reply)
 
