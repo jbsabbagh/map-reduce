@@ -4,12 +4,19 @@ set -e
 
 TIMEOUT=$"gtimeout -k 2s 30s"
 
+# rm mrcoordinator
+# rm mrworker
+
 start=$(date +%s)
 echo "Running test..."
 go build -race -buildmode=plugin apps/wordcount/wc.go
 go build -race runtimes/mrcoordinator.go
 go build -race runtimes/mrworker.go
 $TIMEOUT ./mrcoordinator ../data/pg-*.txt &
+
+sleep 1
+
+$TIMEOUT ./mrworker wc.so &
 $TIMEOUT ./mrworker wc.so &
 $TIMEOUT ./mrworker wc.so
 # go run main.go wc.so ../data/pg*.txt
