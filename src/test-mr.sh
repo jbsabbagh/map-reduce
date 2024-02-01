@@ -17,6 +17,11 @@ end=$(date +%s)
 
 echo "Time elapsed: $((end-start))s"
 
+# Cleanup
+rm wc.so
+rm mrcoordinator
+rm mrworker
+
 exit 0
 
 
