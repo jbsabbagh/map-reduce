@@ -9,20 +9,8 @@ package mr
 import (
 	"os"
 	"strconv"
+	"time"
 )
-
-//
-// example to show how to declare the arguments
-// and reply for an RPC.
-//
-
-type ExampleArgs struct {
-	X int
-}
-
-type ExampleReply struct {
-	Y int
-}
 
 type TaskStatusArgs struct {
 	Id     int
@@ -50,9 +38,19 @@ type RegisterWorkerArgs struct {
 	Status    WorkerStatus
 	Buckets   int
 	WorkerDir string
+	Heatbeat  time.Time
 }
 
 type RegisterWorkerReply struct {
+	Ok bool
+}
+
+type HeartbeatArgs struct {
+	WorkerId  int
+	Heartbeat time.Time
+}
+
+type HeartbeatReply struct {
 	Ok bool
 }
 

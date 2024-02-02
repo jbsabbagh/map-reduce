@@ -39,6 +39,10 @@ func (w *RegisteredWorker) AssignTask(task Task) {
 	w.worker.AssignedTask = task
 }
 
+func (w *RegisteredWorker) SetWorkerStatus(status WorkerStatus) {
+	w.worker.Status = status
+}
+
 func (w RegisteredWorker) GetWorkerDir() string {
 	return w.worker.WorkerDir
 }
@@ -147,8 +151,8 @@ func (c *Coordinator) DisplayStatistics() {
 
 	// TODO: This can be inefficient as we are locking the mutex for the entire duration of the function
 	// Look into RWMutex + tradeoffs
-	c.workerMutex.Lock()
-	defer c.workerMutex.Unlock()
+	// c.workerMutex.Lock()
+	// defer c.workerMutex.Unlock()
 
 	completedTasks := 0
 	totalTasks := len(c.mapTasks) + len(c.reduceTasks)
@@ -165,11 +169,11 @@ func (c *Coordinator) DisplayStatistics() {
 		}
 	}
 	c.Logger.Println("Coordinator status:")
-	for _, worker := range c.workers {
-		c.Logger.Println(worker)
-		c.Logger.Printf("Completed tasks %d", completedTasks)
-		c.Logger.Printf("Total tasks %d", totalTasks)
-	}
+	// for _, worker := range c.workers {
+	// 	c.Logger.Println(worker)
+	// }
+	c.Logger.Printf("Completed tasks %d", completedTasks)
+	c.Logger.Printf("Total tasks %d", totalTasks)
 }
 
 func (c *Coordinator) GetTaskStatus(args *TaskStatusArgs, reply *TaskStatusReply) error {
@@ -191,7 +195,7 @@ func (c *Coordinator) setTaskStatus(id int, taskType TaskType, status TaskStatus
 		{
 			for index := range c.mapTasks {
 				if c.mapTasks[index].Id == id {
-					fmt.Printf("Changing Map Task ID %d to %d", id, status)
+					log.Printf("Changing Map Task ID %d to %d", id, status)
 					c.mapTasks[index].SetStatus(status) // Set the status of the task
 				}
 			}
@@ -201,7 +205,7 @@ func (c *Coordinator) setTaskStatus(id int, taskType TaskType, status TaskStatus
 		{
 			for index := range c.reduceTasks {
 				if c.reduceTasks[index].Id == id {
-					fmt.Printf("Changing Reduce Task ID %d to %d", id, status)
+					log.Printf("Changing Reduce Task ID %d to %d", id, status)
 					c.reduceTasks[index].SetStatus(status) // Set the status of the task
 				}
 			}
@@ -219,7 +223,7 @@ func (c *Coordinator) SendTask(args *NewTaskArgs, reply *NewTaskReply) error {
 		for index, task := range c.mapTasks {
 			if task.Status == NotStarted {
 				c.mapTasks[index].SetStatus(Running)
-				fmt.Printf("Map task found %d\n", task.Id)
+				c.Logger.Printf("Map task found %d\n", task.Id)
 				reply.Type = Map
 				reply.Ok = true
 				reply.Args = map[string]string{
@@ -228,15 +232,11 @@ func (c *Coordinator) SendTask(args *NewTaskArgs, reply *NewTaskReply) error {
 					"Id":        fmt.Sprintf("%d", task.Id),
 				}
 
-				c.workerMutex.Lock()
-				defer c.workerMutex.Unlock()
 				c.assignTaskToWorker(args.WorkerId, task)
 				return nil
 			}
 		}
 	} else if !c.reduceTasksAreDone() {
-		c.workerMutex.Lock()
-		defer c.workerMutex.Unlock()
 
 		c.Logger.Println("Map tasks are done - Fetching reduce task")
 		for index, task := range c.reduceTasks {
@@ -271,6 +271,8 @@ func (c *Coordinator) SendTask(args *NewTaskArgs, reply *NewTaskReply) error {
 
 func (c *Coordinator) assignTaskToWorker(workerId int, task Task) {
 	// TODO: better error handling
+	c.workerMutex.Lock()
+	defer c.workerMutex.Unlock()
 	for index, worker := range c.workers {
 		if worker.GetId() == workerId {
 			c.workers[index].AssignTask(task)
@@ -278,36 +280,50 @@ func (c *Coordinator) assignTaskToWorker(workerId int, task Task) {
 	}
 }
 
-func (c Coordinator) CheckWorkerStatus() {
-	timeout := 10 * time.Second          // TODO: Make this configurable
-	heartbeatInterval := 5 * time.Second // TODO: Make this configurable
+func (c *Coordinator) CheckWorkerStatus() {
+	timeout := 5 * time.Second        // TODO: Make this configurable
+	heartbeatCheck := 5 * time.Second // TODO: Make this configurable
 
-	log.Printf("Setting Hearbeat interval to %d seconds and timeout to %d seconds.", heartbeatInterval, timeout)
-	go func() {
+	log.Println("Setting Hearbeat Check to 5 seconds and timeout to 5 seconds.")
+	go func(timeout, heartbeatCheck time.Duration) {
 		for true {
-			c.workerMutex.Lock()
-			defer c.workerMutex.Unlock()
-
+			c.Logger.Println("Heartbeat Check - Checking worker status")
+			c.Logger.Printf("Number of workers: %d", len(c.workers))
 			for index, worker := range c.workers {
 				lastHearbeat := worker.lastHeartbeat
-				if time.Since(lastHearbeat) > timeout {
-					c.Logger.Printf("Worker %d is not responding. Removing from pool.", worker.worker.Id)
-					c.workers = append(c.workers[:index], c.workers[index+1:]...)
+				c.Logger.Printf("Time since last heartbeat for worker %d is %s", worker.worker.Id, time.Since(lastHearbeat))
+				if worker.worker.Status != Dead && time.Since(lastHearbeat) > timeout {
+					c.Logger.Printf("Worker %d is not responding. Assuming it's dead.", worker.worker.Id)
+
+					c.workerMutex.Lock()
+					c.workers[index].SetWorkerStatus(Dead)
+					c.workerMutex.Unlock()
 
 					assignedTask := worker.GetTask()
 					if assignedTask != nil {
-						c.taskMutex.Lock()
-						defer c.taskMutex.Unlock()
-						fmt.Printf("Changing Task ID %d back to Not Started", assignedTask.GetId())
-
+						c.Logger.Printf("Changing Task ID %d back to Not Started", assignedTask.GetId())
 						c.setTaskStatus(assignedTask.GetId(), assignedTask.GetTaskType(), NotStarted)
-
 					}
 				}
-				time.Sleep(heartbeatInterval)
 			}
+			time.Sleep(heartbeatCheck)
 		}
-	}()
+	}(timeout, heartbeatCheck)
+}
+
+func (c *Coordinator) Heartbeat(args *HeartbeatArgs, reply *HeartbeatReply) error {
+	c.workerMutex.Lock()
+	defer c.workerMutex.Unlock()
+	for index, worker := range c.workers {
+		if worker.worker.Id == args.WorkerId {
+			c.Logger.Printf("Received heartbeat from worker %d", args.WorkerId)
+			c.workers[index].lastHeartbeat = args.Heartbeat
+			reply.Ok = true
+			return nil
+		}
+	}
+	reply.Ok = false
+	return nil
 }
 
 func (c *Coordinator) RegisterWorker(args *RegisterWorkerArgs, reply *RegisterWorkerReply) error {

@@ -27,6 +27,7 @@ func main() {
 	mapf, reducef := loadPlugin(os.Args[1])
 
 	worker := mr.MakeWorker(10)
+	worker.Hearbeat()
 	worker.Run(mapf, reducef)
 }
 

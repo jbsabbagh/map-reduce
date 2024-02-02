@@ -38,7 +38,8 @@ type WorkerStatus int
 
 const (
 	Idle        WorkerStatus = 0
-	RunningTask WorkerStatus = iota
+	RunningTask WorkerStatus = 1
+	Dead        WorkerStatus = 2
 )
 
 type Worker struct {
@@ -157,6 +158,23 @@ func (w Worker) loadDataFromIntermediateFiles(workerDirs []string, index int) []
 	return intermediate
 }
 
+func (w Worker) Hearbeat() {
+
+	heartbeat := time.Second * 2
+	go func(heartbeat time.Duration) {
+		for true {
+			w.Logger.Println("Sending heartbeat")
+			args := HeartbeatArgs{
+				WorkerId:  w.Id,
+				Heartbeat: time.Now(),
+			}
+			reply := HeartbeatReply{}
+			w.call("Coordinator.Heartbeat", &args, &reply)
+			time.Sleep(heartbeat)
+		}
+	}(heartbeat)
+}
+
 func (w Worker) getTask() (Task, error) {
 	args := NewTaskArgs{WorkerId: w.Id}
 	reply := NewTaskReply{}
@@ -214,6 +232,7 @@ func (w Worker) registerWorker() {
 		Status:    Idle,
 		Buckets:   w.Buckets,
 		WorkerDir: w.WorkerDir,
+		Heatbeat:  time.Now(),
 	}
 	reply := RegisterWorkerReply{}
 	w.call("Coordinator.RegisterWorker", &args, &reply)

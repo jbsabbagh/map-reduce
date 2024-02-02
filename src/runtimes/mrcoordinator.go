@@ -23,12 +23,13 @@ func main() {
 	}
 
 	coordinator := mr.MakeCoordinator(os.Args[1:], 10)
+	coordinator.CheckWorkerStatus()
 	for coordinator.Done() == false {
 		// coordinator.DisplayStatistics()
 		time.Sleep(time.Second)
 	}
 
 	coordinator.Logger.Println("Application has completed successfully!")
-	coordinator.DisplayStatistics()
+	// coordinator.DisplayStatistics()
 	time.Sleep(time.Second)
 }
