@@ -7,11 +7,13 @@ import (
 	"net/http"
 	"net/rpc"
 	"os"
+	"path/filepath"
 	"sync"
 )
 
 type Coordinator struct {
 	Logger      *log.Logger
+	dataDir     string
 	workers     []Worker
 	mapTasks    []MapTask
 	reduceTasks []ReduceTask
@@ -77,9 +79,11 @@ func (c *Coordinator) reduceTasksAreDone() bool {
 // main/mrcoordinator.go calls this function.
 // nReduce is the number of reduce tasks to use.
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
+	dataDir := filepath.Dir(files[0])
 	c := Coordinator{
 		mapTasks:    make([]MapTask, 0),
 		reduceTasks: make([]ReduceTask, 0),
+		dataDir:     dataDir,
 		workers:     []Worker{},
 		Logger:      log.New(os.Stdout, "Coordinator: ", log.Lshortfile|log.Ltime|log.Ldate),
 		taskMutex:   &sync.Mutex{},
@@ -97,18 +101,14 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 		c.mapTasks = append(c.mapTasks, mapTask)
 	}
 
-	outputFiles := make(map[int]*os.File)
 	for index := 0; index < nReduce; index++ {
 		oname := fmt.Sprintf("out-%d", index)
-		filepath := fmt.Sprintf("%s/%s", OUTPUT_DIR, oname)
-		file, _ := os.Create(filepath)
-		outputFiles[index] = file
 
 		reduceTask := ReduceTask{
 			Id:             index,
 			Status:         NotStarted,
 			Index:          index,
-			OutputDir:      OUTPUT_DIR,
+			OutputDir:      fmt.Sprintf("%s/out", dataDir),
 			OutputFileName: oname,
 		}
 

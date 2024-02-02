@@ -28,7 +28,7 @@ func MakeWorker(buckets int) Worker {
 		WorkerDir: fmt.Sprintf("/tmp/%d", os.Getpid()),
 		Logger:    log.New(os.Stdout, fmt.Sprintf("Worker %d: ", os.Getpid()), log.Lshortfile|log.Ltime|log.Ldate),
 	}
-	worker.Logger.Printf("Setting up Worker with ID %d", worker.Id)
+	worker.Logger.Print("Setting up Worker", worker)
 	worker.setUp()
 	return worker
 }
@@ -94,7 +94,14 @@ func (w Worker) Run(
 				task := task.(ReduceTask)
 				task.Status = Running
 				w.Logger.Println("Received reduce task\n", task)
-				outputFile, _ := os.Create(task.OutputDir + task.OutputFileName)
+				outputFile, err := os.Create(task.OutputDir + task.OutputFileName)
+
+				if err != nil {
+					w.Logger.Fatal("Error creating output file", err)
+				} else {
+					w.Logger.Printf("Output file created %s", task.OutputDir+task.OutputFileName)
+				}
+
 				defer outputFile.Close()
 				intermediate := w.loadDataFromIntermediateFiles(task.WorkerDirs, task.Index)
 				sort.Sort(ByKey(intermediate))

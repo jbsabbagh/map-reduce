@@ -24,7 +24,7 @@ func main() {
 
 	coordinator := mr.MakeCoordinator(os.Args[1:], 10)
 	for coordinator.Done() == false {
-		coordinator.DisplayStatistics()
+		// coordinator.DisplayStatistics()
 		time.Sleep(time.Second)
 	}
 

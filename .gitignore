@@ -1,3 +1,4 @@
 *.so
 data/out
 data/intermediate
+src/mr-tmp
