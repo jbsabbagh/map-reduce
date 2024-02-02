@@ -9,16 +9,38 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 type Coordinator struct {
 	Logger      *log.Logger
 	dataDir     string
-	workers     []Worker
+	workers     []RegisteredWorker
 	mapTasks    []MapTask
 	reduceTasks []ReduceTask
 	taskMutex   *sync.Mutex
 	workerMutex *sync.Mutex
+}
+
+type RegisteredWorker struct {
+	worker        Worker
+	lastHeartbeat time.Time
+}
+
+func (w RegisteredWorker) GetTask() Task {
+	return w.worker.AssignedTask
+}
+
+func (w RegisteredWorker) GetId() int {
+	return w.worker.Id
+}
+
+func (w *RegisteredWorker) AssignTask(task Task) {
+	w.worker.AssignedTask = task
+}
+
+func (w RegisteredWorker) GetWorkerDir() string {
+	return w.worker.WorkerDir
 }
 
 // start a thread that listens for RPCs from worker.go
@@ -84,7 +106,7 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 		mapTasks:    make([]MapTask, 0),
 		reduceTasks: make([]ReduceTask, 0),
 		dataDir:     dataDir,
-		workers:     []Worker{},
+		workers:     []RegisteredWorker{},
 		Logger:      log.New(os.Stdout, "Coordinator: ", log.Lshortfile|log.Ltime|log.Ldate),
 		taskMutex:   &sync.Mutex{},
 		workerMutex: &sync.Mutex{},
@@ -151,21 +173,26 @@ func (c *Coordinator) DisplayStatistics() {
 }
 
 func (c *Coordinator) GetTaskStatus(args *TaskStatusArgs, reply *TaskStatusReply) error {
-	c.taskMutex.Lock()
-	defer c.taskMutex.Unlock()
-
 	id := args.Id
 	taskType := args.Type
 	reply.Ok = true
 
 	c.Logger.Printf("Received task status for id %d", id)
+	c.setTaskStatus(id, taskType, args.Status)
+	return nil
+}
+
+func (c *Coordinator) setTaskStatus(id int, taskType TaskType, status TaskStatus) {
+	c.taskMutex.Lock()
+	defer c.taskMutex.Unlock()
+
 	switch taskType {
 	case Map:
 		{
 			for index := range c.mapTasks {
 				if c.mapTasks[index].Id == id {
-					c.mapTasks[index].SetStatus(args.Status) // Set the status of the task
-					c.Logger.Printf("Map task status updated %d to Success!", id)
+					fmt.Printf("Changing Map Task ID %d to %d", id, status)
+					c.mapTasks[index].SetStatus(status) // Set the status of the task
 				}
 			}
 
@@ -174,20 +201,19 @@ func (c *Coordinator) GetTaskStatus(args *TaskStatusArgs, reply *TaskStatusReply
 		{
 			for index := range c.reduceTasks {
 				if c.reduceTasks[index].Id == id {
-					c.reduceTasks[index].SetStatus(args.Status) // Set the status of the task
-					c.Logger.Printf("Reduce task status updated %d to Success!", id)
+					fmt.Printf("Changing Reduce Task ID %d to %d", id, status)
+					c.reduceTasks[index].SetStatus(status) // Set the status of the task
 				}
 			}
 		}
 	}
-	return nil
 }
 
 func (c *Coordinator) SendTask(args *NewTaskArgs, reply *NewTaskReply) error {
 	c.taskMutex.Lock()
 	defer c.taskMutex.Unlock()
 
-	c.Logger.Println("Task requested")
+	c.Logger.Printf("Worker %d requested a task", args.WorkerId)
 	if !c.mapTasksAreDone() {
 		c.Logger.Println("Map tasks are not done - Fetching map task")
 		for index, task := range c.mapTasks {
@@ -202,6 +228,9 @@ func (c *Coordinator) SendTask(args *NewTaskArgs, reply *NewTaskReply) error {
 					"Id":        fmt.Sprintf("%d", task.Id),
 				}
 
+				c.workerMutex.Lock()
+				defer c.workerMutex.Unlock()
+				c.assignTaskToWorker(args.WorkerId, task)
 				return nil
 			}
 		}
@@ -217,14 +246,15 @@ func (c *Coordinator) SendTask(args *NewTaskArgs, reply *NewTaskReply) error {
 				reply.Type = Reduce
 				reply.Ok = true
 				reply.Args = map[string]string{
-					"Id":        fmt.Sprintf("%d", task.Id),
-					"Index":     fmt.Sprintf("%d", task.Index),
-					"OutputDir": OUTPUT_DIR, "IntermediateFile": fmt.Sprintf("intermediate-%d", task.Index),
-					"OutputFileName": fmt.Sprintf("out-%d", task.Index),
+					"Id":               fmt.Sprintf("%d", task.Id),
+					"Index":            fmt.Sprintf("%d", task.Index),
+					"OutputDir":        task.OutputDir,
+					"IntermediateFile": fmt.Sprintf("intermediate-%d", task.Index),
+					"OutputFileName":   fmt.Sprintf("out-%d", task.Index),
 				}
 				reply.WorkerDirs = []string{}
 				for _, worker := range c.workers {
-					reply.WorkerDirs = append(reply.WorkerDirs, worker.WorkerDir)
+					reply.WorkerDirs = append(reply.WorkerDirs, worker.GetWorkerDir())
 				}
 				return nil
 			}
@@ -239,6 +269,47 @@ func (c *Coordinator) SendTask(args *NewTaskArgs, reply *NewTaskReply) error {
 	return nil
 }
 
+func (c *Coordinator) assignTaskToWorker(workerId int, task Task) {
+	// TODO: better error handling
+	for index, worker := range c.workers {
+		if worker.GetId() == workerId {
+			c.workers[index].AssignTask(task)
+		}
+	}
+}
+
+func (c Coordinator) CheckWorkerStatus() {
+	timeout := 10 * time.Second          // TODO: Make this configurable
+	heartbeatInterval := 5 * time.Second // TODO: Make this configurable
+
+	log.Printf("Setting Hearbeat interval to %d seconds and timeout to %d seconds.", heartbeatInterval, timeout)
+	go func() {
+		for true {
+			c.workerMutex.Lock()
+			defer c.workerMutex.Unlock()
+
+			for index, worker := range c.workers {
+				lastHearbeat := worker.lastHeartbeat
+				if time.Since(lastHearbeat) > timeout {
+					c.Logger.Printf("Worker %d is not responding. Removing from pool.", worker.worker.Id)
+					c.workers = append(c.workers[:index], c.workers[index+1:]...)
+
+					assignedTask := worker.GetTask()
+					if assignedTask != nil {
+						c.taskMutex.Lock()
+						defer c.taskMutex.Unlock()
+						fmt.Printf("Changing Task ID %d back to Not Started", assignedTask.GetId())
+
+						c.setTaskStatus(assignedTask.GetId(), assignedTask.GetTaskType(), NotStarted)
+
+					}
+				}
+				time.Sleep(heartbeatInterval)
+			}
+		}
+	}()
+}
+
 func (c *Coordinator) RegisterWorker(args *RegisterWorkerArgs, reply *RegisterWorkerReply) error {
 	c.workerMutex.Lock()
 	defer c.workerMutex.Unlock()
@@ -249,7 +320,7 @@ func (c *Coordinator) RegisterWorker(args *RegisterWorkerArgs, reply *RegisterWo
 		Buckets:   args.Buckets,
 		WorkerDir: args.WorkerDir,
 	}
-	c.workers = append(c.workers, worker)
+	c.workers = append(c.workers, RegisteredWorker{worker: worker, lastHeartbeat: time.Now()})
 	reply.Ok = true
 
 	return nil

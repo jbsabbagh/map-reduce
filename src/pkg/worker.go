@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/rpc"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"time"
@@ -47,6 +48,13 @@ type Worker struct {
 	Buckets      int
 	WorkerDir    string
 	Logger       *log.Logger
+}
+
+func (w *Worker) AssignTask(task Task) bool {
+	w.AssignedTask = task
+	w.Status = RunningTask
+
+	return true
 }
 
 func (w Worker) Run(
@@ -94,12 +102,13 @@ func (w Worker) Run(
 				task := task.(ReduceTask)
 				task.Status = Running
 				w.Logger.Println("Received reduce task\n", task)
-				outputFile, err := os.Create(task.OutputDir + task.OutputFileName)
+				outputPath := filepath.Join(task.OutputDir, task.OutputFileName)
+				outputFile, err := os.Create(outputPath)
 
 				if err != nil {
 					w.Logger.Fatal("Error creating output file", err)
 				} else {
-					w.Logger.Printf("Output file created %s", task.OutputDir+task.OutputFileName)
+					w.Logger.Printf("Output file created %s", outputPath)
 				}
 
 				defer outputFile.Close()
@@ -149,7 +158,7 @@ func (w Worker) loadDataFromIntermediateFiles(workerDirs []string, index int) []
 }
 
 func (w Worker) getTask() (Task, error) {
-	args := NewTaskArgs{}
+	args := NewTaskArgs{WorkerId: w.Id}
 	reply := NewTaskReply{}
 	w.call("Coordinator.SendTask", &args, &reply)
 	if !reply.Ok {

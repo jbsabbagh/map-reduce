@@ -35,6 +35,7 @@ type TaskStatusReply struct {
 }
 
 type NewTaskArgs struct {
+	WorkerId int
 }
 
 type NewTaskReply struct {

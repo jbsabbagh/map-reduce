@@ -79,19 +79,3 @@ const (
 	Success    TaskStatus = 2
 	Failure    TaskStatus = 3
 )
-
-type Args interface{}
-
-type MapArgs struct {
-	InputFile         string
-	IntermediateFiles map[int]IntermediateFile
-	Index             int
-}
-
-type ReduceArgs struct {
-	Index            int
-	IntermediateDir  string
-	OutputDir        string
-	IntermediateFile string
-	OutputFileName   string
-}
