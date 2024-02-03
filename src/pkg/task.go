@@ -5,6 +5,7 @@ type Task interface {
 	GetTaskType() TaskType
 	GetId() int
 	GetStatus() TaskStatus
+	GetStatusStr() string
 }
 type MapTask struct {
 	Id        int
@@ -24,6 +25,21 @@ func (t MapTask) GetId() int {
 
 func (t MapTask) GetStatus() TaskStatus {
 	return t.Status
+}
+
+func (t MapTask) GetStatusStr() string {
+	switch t.Status {
+	case NotStarted:
+		return "Not Started"
+	case Running:
+		return "Running"
+	case Success:
+		return "Success"
+	case Failure:
+		return "Failure"
+	default:
+		return "Unknown"
+	}
 }
 
 func (t MapTask) GetTaskType() TaskType {
@@ -54,6 +70,21 @@ func (t ReduceTask) GetId() int {
 
 func (t ReduceTask) GetStatus() TaskStatus {
 	return t.Status
+}
+
+func (t ReduceTask) GetStatusStr() string {
+	switch t.Status {
+	case NotStarted:
+		return "Not Started"
+	case Running:
+		return "Running"
+	case Success:
+		return "Success"
+	case Failure:
+		return "Failure"
+	default:
+		return "Unknown"
+	}
 }
 
 func (t *ReduceTask) SetStatus(status TaskStatus) {
