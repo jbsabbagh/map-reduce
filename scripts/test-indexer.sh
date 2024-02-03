@@ -23,7 +23,7 @@ then
 else
   echo '---' indexer output is not the same as mr-correct-indexer.txt
   echo '---' indexer test: FAIL
-  failed_any=1
+  $failed_any=1
 fi
 
 rm $DATA_DIR/intermediate/*

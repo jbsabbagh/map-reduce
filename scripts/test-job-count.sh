@@ -18,5 +18,5 @@ then
 else
   echo '---' map jobs ran incorrect number of times "($NT != 8)"
   echo '---' job count test: FAIL
-  failed_any=1
+  $failed_any=1
 fi

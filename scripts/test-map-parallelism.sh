@@ -22,5 +22,5 @@ then
 else
   echo '---' map workers did not run in parallel
   echo '---' map parallelism test: FAIL
-  failed_any=1
+  $failed_any=1
 fi

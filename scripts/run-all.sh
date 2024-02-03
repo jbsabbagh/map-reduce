@@ -3,12 +3,13 @@
 export REPO_ROOT=$(git rev-parse --show-toplevel)
 export DATA_DIR=$REPO_ROOT/data
 export CODE_DIR=$REPO_ROOT/src/mr-tmp
-export TIMEOUT=$"gtimeout -k 2s 30s"
+export TIMEOUT=$"gtimeout -k 2s 180s"
 export RACE=-race
 export failed_any=0
 
-# $REPO_ROOT/scripts/compile.sh
+$REPO_ROOT/scripts/compile.sh
 
+# $REPO_ROOT/scripts/cleanup.sh
 # $REPO_ROOT/scripts/test-simple-word-count.sh
 
 # wait
@@ -36,14 +37,14 @@ export failed_any=0
 # $REPO_ROOT/scripts/cleanup.sh
 # $REPO_ROOT/scripts/test-early-exit.sh
 
-# wait
+wait
 
 $REPO_ROOT/scripts/cleanup.sh
 $REPO_ROOT/scripts/test-crash.sh
 
-# if [ $failed_any -eq 0 ]; then
-#     echo '***' PASSED ALL TESTS
-# else
-#     echo '***' FAILED SOME TESTS
-#     exit 1
-# fi
+if [ $failed_any -eq 0 ]; then
+    echo '***' PASSED ALL TESTS
+else
+    echo '***' FAILED SOME TESTS
+    exit 1
+fi

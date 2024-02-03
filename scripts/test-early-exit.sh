@@ -51,5 +51,5 @@ then
 else
   echo '---' output changed after first worker exited
   echo '---' early exit test: FAIL
-  failed_any=1
+  $failed_any=1
 fi

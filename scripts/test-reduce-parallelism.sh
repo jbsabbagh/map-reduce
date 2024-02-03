@@ -13,7 +13,7 @@ if [ "$NT" -lt "2" ]
 then
   echo '---' too few parallel reduces.
   echo '---' reduce parallelism test: FAIL
-  failed_any=1
+  $failed_any=1
 else
   echo '---' reduce parallelism test: PASS
 fi

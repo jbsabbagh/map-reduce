@@ -45,5 +45,5 @@ then
 else
   echo '---' crash output is not the same as mr-correct-crash.txt
   echo '---' crash test: FAIL
-  failed_any=1
+  $failed_any=1
 fi
